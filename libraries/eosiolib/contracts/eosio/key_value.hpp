@@ -5,6 +5,7 @@
 #include "../../core/eosio/utility.hpp"
 
 #include <algorithm>
+#include <any>
 #include <cctype>
 #include <functional>
 
@@ -401,6 +402,7 @@ public:
     * Convenience functions exist to handle most of the primitive types as well as some more complex types, and are
     * used automatically where possible.
     */
+   template <typename K>
    class kv_index {
       class iterator {
       public:
@@ -569,7 +571,7 @@ public:
        *
        * @return An iterator pointing to the element with the lowest key greater than or equal to the given key.
        */
-      template <typename K>
+      //template <typename K>
       iterator lower_bound(K&& key) {
          auto t_key = table_key(prefix, make_key(std::forward<K>(key)));
 
@@ -590,7 +592,7 @@ public:
        *
        * @return An iterator pointing to the element with the highest key less than or equal to the given key.
        */
-      template <typename K>
+      //template <typename K>
       iterator upper_bound(K&& key) {
          auto t_key = table_key(prefix, make_key(std::forward<K>(key)));
 
@@ -640,7 +642,7 @@ public:
        * @param end - The end of the range.
        * @return A vector containing all the objects that fall between the range.
        */
-      template <typename K>
+      //template <typename K>
       std::vector<T> range(K&& b, K&& e) {
          auto begin_itr = lower_bound(std::forward<K>(b));
          auto end_itr = lower_bound(std::forward<K>(e));
@@ -677,9 +679,11 @@ public:
       }
    };
 
-   using iterator = typename kv_index::iterator;
 
-   class kv_unique_index : public kv_index {
+   //using iterator = typename kv_index::iterator;
+
+   template <typename K>
+   class kv_unique_index : public kv_index<K> {
    public:
       kv_unique_index() = default;
 
@@ -698,7 +702,7 @@ public:
        * @param key - The key to search for.
        * @return An iterator to the found object OR the `end` iterator if the given key was not found.
        */
-      template <typename K>
+      //template <typename K>
       iterator find(K&& key) {
          auto t_key = table_key(prefix, make_key(std::forward<K>(key)));
 
@@ -724,7 +728,7 @@ public:
        * @param key - The key to search for.
        * @return A std::optional of the value corresponding to the key.
        */
-      template <typename K>
+      //template <typename K>
       std::optional<T> get(K&& key) {
          uint32_t value_size;
          std::optional<T> ret_val;
@@ -771,12 +775,13 @@ public:
          return true;
       }
 
-      using kv_table<T>::kv_index::tbl;
-      using kv_table<T>::kv_index::contract_name;
-      using kv_table<T>::kv_index::prefix;
+      using kv_table<T>::kv_index<K>::tbl;
+      using kv_table<T>::kv_index<K>::contract_name;
+      using kv_table<T>::kv_index<K>::prefix;
    };
 
-   class kv_non_unique_index : public kv_index {
+   template <typename K>
+   class kv_non_unique_index : public kv_index<K> {
    public:
       kv_non_unique_index() = default;
 
@@ -786,7 +791,7 @@ public:
       template <typename KF>
       kv_non_unique_index(eosio::name name, KF&& kf) : kv_index{name, kf} {}
 
-      using kv_table<T>::kv_index::tbl;
+      using kv_table<T>::kv_index<K>::tbl;
 
       bool is_unique() override {
          return false;
@@ -801,7 +806,7 @@ public:
     * @details Due to the way indexes are named, when deleting an index a "placeholder" index needs to be created instead.
     * A null_kv_index should be created in this case. If using DEFINE_TABLE, just passing in nullptr will handle this.
     */
-   class null_kv_index : public kv_index {
+   class null_kv_index : public kv_index<void> {
    public:
       template <typename KF>
       null_kv_index(KF&& kf): kv_index{kf} {}
@@ -961,14 +966,14 @@ private:
    uint64_t db_name;
 
 
-   kv_unique_index* primary_index;
-   std::vector<kv_index*> secondary_indices;
+   kv_unique_index<std::any>* primary_index;
+   std::vector<kv_index<std::any>*> secondary_indices;
 
    template <size_t I, typename U>
    constexpr static auto& get(U& u) {
-      constexpr size_t kv_index_size = sizeof(kv_index);
+      constexpr size_t kv_index_size = sizeof(kv_index<std::any>);
       static_assert(sizeof(U) % kv_index_size == 0);
-      kv_index* indices = (kv_index*)(&u);
+      kv_index<std::any>* indices = (kv_index<std::any>*)(&u);
       return indices[I];
    }
 
@@ -984,9 +989,9 @@ private:
 
    template <typename U, typename F>
    constexpr static void for_each_field(U& u, F&& f) {
-      constexpr size_t kv_index_size = sizeof(kv_index);
+      constexpr size_t kv_index_size = sizeof(kv_index<std::any>);
       static_assert(sizeof(U) % kv_index_size == 0);
-      constexpr size_t num_elems = (sizeof(U) / sizeof(kv_index)) - 1;
+      constexpr size_t num_elems = (sizeof(U) / sizeof(kv_index<std::any>)) - 1;
       for_each_field<num_elems>(u, f);
    }
 };
