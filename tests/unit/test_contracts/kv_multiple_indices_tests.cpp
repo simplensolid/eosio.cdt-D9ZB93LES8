@@ -16,10 +16,10 @@ struct my_struct {
 
 struct my_table : eosio::kv_table<my_struct> {
    struct {
-      kv_unique_index primary_key{&my_struct::primary_key};
-      kv_non_unique_index foo{&my_struct::foo};
-      kv_unique_index bar{&my_struct::bar};
-      kv_non_unique_index baz{&my_struct::baz};
+      kv_unique_index<eosio::name>     primary_key{&my_struct::primary_key};
+      kv_non_unique_index<std::string> foo{&my_struct::foo};
+      kv_unique_index<uint64_t>        bar{&my_struct::bar};
+      kv_non_unique_index<int32_t>     baz{&my_struct::baz};
    } index;
 
    my_table(eosio::name contract_name) {
@@ -29,9 +29,9 @@ struct my_table : eosio::kv_table<my_struct> {
 
 struct my_table2 : eosio::kv_table<my_struct> {
    struct {
-      kv_unique_index primary_key{&my_struct::primary_key};
-      null_kv_index nullptr_2{&my_struct::foo};
-      kv_non_unique_index bar{&my_struct::bar};
+      kv_unique_index<eosio::name>  primary_key{&my_struct::primary_key};
+      null_kv_index                 nullptr_2{&my_struct::foo};
+      kv_non_unique_index<uint64_t> bar{&my_struct::bar};
    } index;
 
    my_table2(eosio::name contract_name) {
@@ -41,8 +41,8 @@ struct my_table2 : eosio::kv_table<my_struct> {
 
 struct my_table_idx : eosio::kv_table<my_struct> {
    struct {
-      kv_unique_index primary_key{"prim"_n, &my_struct::primary_key};
-      kv_non_unique_index foo{"f"_n, &my_struct::foo};
+      kv_unique_index<eosio::name>     primary_key{"prim"_n, &my_struct::primary_key};
+      kv_non_unique_index<std::string> foo{"f"_n, &my_struct::foo};
    } index;
 
    my_table_idx(eosio::name contract_name) {
@@ -52,8 +52,8 @@ struct my_table_idx : eosio::kv_table<my_struct> {
 
 struct my_table_idx_err : eosio::kv_table<my_struct> {
    struct {
-      kv_unique_index primary_key{"prim"_n, &my_struct::primary_key};
-      kv_non_unique_index foo{&my_struct::foo};
+      kv_unique_index<eosio::name>     primary_key{"prim"_n, &my_struct::primary_key};
+      kv_non_unique_index<std::string> foo{&my_struct::foo};
    } index;
 
    my_table_idx_err(eosio::name contract_name) {
@@ -63,8 +63,8 @@ struct my_table_idx_err : eosio::kv_table<my_struct> {
 
 struct my_table_idx_err_2 : eosio::kv_table<my_struct> {
    struct {
-      kv_unique_index primary_key{&my_struct::primary_key};
-      kv_non_unique_index foo{"f"_n, &my_struct::foo};
+      kv_unique_index<eosio::name>     primary_key{&my_struct::primary_key};
+      kv_non_unique_index<std::string> foo{"f"_n, &my_struct::foo};
    } index;
 
    my_table_idx_err_2(eosio::name contract_name) {
@@ -74,7 +74,7 @@ struct my_table_idx_err_2 : eosio::kv_table<my_struct> {
 
 struct my_table_idx_err_3 : eosio::kv_table<my_struct> {
    struct {
-      kv_non_unique_index primary_key{&my_struct::primary_key};
+      kv_non_unique_index<eosio::name> primary_key{&my_struct::primary_key};
    } index;
 
    my_table_idx_err_3(eosio::name contract_name) {

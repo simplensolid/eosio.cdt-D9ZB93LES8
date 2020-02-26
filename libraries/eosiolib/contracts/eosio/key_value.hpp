@@ -24,6 +24,8 @@
 #define EOSIO_CDT_CAT(x, y) EOSIO_CDT_CAT2(x, y)
 #define EOSIO_CDT_APPLY(f, args) f args
 
+#define EOSIO_CDT_GET_RETURN_T(value_class, index_name) std::remove_cv_t<std::decay_t<decltype(get_return_t(&value_class::index_name))>>
+
 #define EOSIO_CDT_KV_FIX_INDEX_NAME_0(index_name, i) index_name
 #define EOSIO_CDT_KV_FIX_INDEX_NAME_1(index_name, i) index_name ## i
 #define EOSIO_CDT_KV_FIX_INDEX_NAME(x, i) EOSIO_CDT_KV_FIX_INDEX_NAME_ ## x
@@ -53,10 +55,10 @@
 
 
 #define EOSIO_CDT_CREATE_KV_NON_UNIQUE_INDEX(r, value_class, i, index_name)                                            \
-   EOSIO_CDT_KV_INDEX_TYPE(index_name) EOSIO_CDT_KV_INDEX_NAME(index_name, i) EOSIO_CDT_KV_INDEX_CONSTRUCT(value_class, index_name);
+   EOSIO_CDT_KV_INDEX_TYPE(index_name)<EOSIO_CDT_GET_RETURN_T(value_class, index_name)> EOSIO_CDT_KV_INDEX_NAME(index_name, i) EOSIO_CDT_KV_INDEX_CONSTRUCT(value_class, index_name);
 
 #define EOSIO_CDT_CREATE_KV_UNIQUE_INDEX(r, value_class, i, index_name)                                                \
-   kv_unique_index EOSIO_CDT_KV_INDEX_NAME(index_name, i) EOSIO_CDT_KV_INDEX_CONSTRUCT(value_class, index_name);
+   kv_unique_index<EOSIO_CDT_GET_RETURN_T(value_class, index_name)> EOSIO_CDT_KV_INDEX_NAME(index_name, i) EOSIO_CDT_KV_INDEX_CONSTRUCT(value_class, index_name);
 
 #define EOSIO_CDT_CREATE_KV_INDEX(r, value_class, i, index_name)                                                       \
    BOOST_PP_IF(i, EOSIO_CDT_CREATE_KV_NON_UNIQUE_INDEX, EOSIO_CDT_CREATE_KV_UNIQUE_INDEX)(r, value_class, i, index_name)
@@ -139,6 +141,17 @@ namespace eosio {
 namespace detail {
    constexpr inline size_t max_stack_buffer_size = 512;
 }
+
+/* @cond PRIVATE */
+template <typename R, typename Cls, typename... Args>
+auto get_return_t(R (Cls::*)(Args...)) -> R;
+
+template <typename R, typename Cls, typename... Args>
+auto get_return_t(R (Cls::*)(Args...) const) -> R;
+
+template <typename R, typename Cls, typename... Args>
+auto get_return_t(R (Cls::*)) -> R;
+/* @endcond */
 
 /**
  * The key_type struct is used to store the binary representation of a key.
@@ -403,7 +416,211 @@ class kv_table {
       iterator_end    = -2, // Iterator is out-of-bounds
    };
 
-public:
+   struct index_config {
+      uint64_t db_name;
+      eosio::name contract_name;
+      eosio::name index_name;
+      eosio::name primary_index_name;
+      key_type prefix;
+   };
+
+   class iterator {
+   public:
+      iterator(uint32_t itr, kv_it_stat itr_stat, const index_config& config) : itr{itr}, itr_stat{itr_stat}, config{config} {}
+
+      iterator(iterator&& other) :
+         itr(std::exchange(other.itr, 0)),
+         itr_stat(std::move(other.itr_stat)),
+         config(std::move(other.config))
+      {}
+
+      ~iterator() {
+         if (itr) {
+            internal_use_do_not_use::kv_it_destroy(itr);
+         }
+      }
+
+      iterator& operator=(iterator&& other) {
+         itr = std::exchange(other.itr, itr);
+         itr_stat = std::move(other.itr_stat);
+         config = std::move(other.config);
+
+         return *this;
+      }
+
+      /**
+       * Returns the value that the iterator points to.
+       * @ingroup keyvalue
+       *
+       * @return The value that the iterator points to.
+       */
+      T value() const {
+         using namespace detail;
+
+         eosio::check(itr_stat != kv_it_stat::iterator_end, "Cannot read end iterator");
+
+         uint32_t value_size;
+         uint32_t actual_value_size;
+         uint32_t offset = 0;
+
+         // call once to get the value_size
+         internal_use_do_not_use::kv_it_value(itr, 0, (char*)nullptr, 0, value_size);
+
+         void* buffer = value_size > detail::max_stack_buffer_size ? malloc(value_size) : alloca(value_size);
+         auto stat = internal_use_do_not_use::kv_it_value(itr, offset, (char*)buffer, value_size, actual_value_size);
+
+         eosio::check(static_cast<kv_it_stat>(stat) != kv_it_stat::iterator_end, "Error reading value");
+
+         void* deserialize_buffer = buffer;
+         size_t deserialize_size = actual_value_size;
+
+         if (config.index_name != config.primary_index_name) {
+            uint32_t actual_data_size;
+            auto success = internal_use_do_not_use::kv_get(config.db_name, config.contract_name.value, (char*)buffer, actual_value_size, actual_data_size);
+            eosio::check(success, "failure getting primary key");
+
+            void* pk_buffer = actual_data_size > detail::max_stack_buffer_size ? malloc(actual_data_size) : alloca(actual_data_size);
+            internal_use_do_not_use::kv_get_data(config.db_name, 0, (char*)pk_buffer, actual_data_size);
+
+            deserialize_buffer = pk_buffer;
+            deserialize_size = actual_data_size;
+         }
+
+         T val;
+         deserialize(val, deserialize_buffer, deserialize_size);
+         return val;
+      }
+
+      iterator& operator++() {
+         eosio::check(itr_stat != kv_it_stat::iterator_end, "cannot increment end iterator");
+         itr_stat = static_cast<kv_it_stat>(internal_use_do_not_use::kv_it_next(itr));
+         return *this;
+      }
+
+      iterator& operator--() {
+         if (!itr) {
+            itr = internal_use_do_not_use::kv_it_create(config.db_name, config.contract_name.value, config.prefix.data(), config.prefix.size());
+         }
+         itr_stat = static_cast<kv_it_stat>(internal_use_do_not_use::kv_it_prev(itr));
+         eosio::check(itr_stat != kv_it_stat::iterator_end, "decremented past the beginning");
+         return *this;
+      }
+
+      bool operator==(const iterator& b) const {
+         return compare(b) == 0;
+      }
+
+      bool operator!=(const iterator& b) const {
+         return compare(b) != 0;
+      }
+
+      bool operator<(const iterator& b) const {
+         return compare(b) < 0;
+      }
+
+      bool operator<=(const iterator& b) const {
+         return compare(b) <= 0;
+      }
+
+      bool operator>(const iterator& b) const {
+         return compare(b) > 0;
+      }
+
+      bool operator>=(const iterator& b) const {
+         return compare(b) >= 0;
+      }
+
+   private:
+      uint32_t itr;
+      kv_it_stat itr_stat;
+
+      index_config config;
+
+      int compare(const iterator& b) const {
+         bool a_is_end = !itr || itr_stat == kv_it_stat::iterator_end;
+         bool b_is_end = !b.itr || b.itr_stat == kv_it_stat::iterator_end;
+         if (a_is_end && b_is_end) {
+            return 0;
+         } else if (a_is_end && b.itr) {
+            return 1;
+         } else if (itr && b_is_end) {
+            return -1;
+         } else {
+            return internal_use_do_not_use::kv_it_compare(itr, b.itr);
+         }
+      }
+   };
+
+   template <typename K>
+   struct kv_index_impl {
+      kv_index_impl() = default;
+
+      kv_index_impl(const index_config& config)
+         : config{config} {}
+
+      index_config config;
+
+      iterator begin() {
+         uint32_t itr = internal_use_do_not_use::kv_it_create(config.db_name, config.contract_name.value, config.prefix.data(), config.prefix.size());
+         int32_t itr_stat = internal_use_do_not_use::kv_it_lower_bound(itr, "", 0);
+
+         return {itr, static_cast<kv_it_stat>(itr_stat), config};
+      }
+
+      iterator end() {
+         return {0, kv_it_stat::iterator_end, config};
+      }
+
+      iterator lower_bound(K&& key) {
+         auto t_key = table_key(config.prefix, make_key(std::forward<K>(key)));
+
+         uint32_t itr = internal_use_do_not_use::kv_it_create(config.db_name, config.contract_name.value, config.prefix.data(), config.prefix.size());
+         int32_t itr_stat = internal_use_do_not_use::kv_it_lower_bound(itr, t_key.data(), t_key.size());
+
+         if (static_cast<kv_it_stat>(itr_stat) == kv_it_stat::iterator_end) {
+            internal_use_do_not_use::kv_it_destroy(itr);
+            return end();
+         }
+
+         return {itr, static_cast<kv_it_stat>(itr_stat), config};
+      }
+
+      iterator upper_bound(K&& key) {
+         auto t_key = table_key(config.prefix, make_key(std::forward<K>(key)));
+
+         uint32_t itr = internal_use_do_not_use::kv_it_create(config.db_name, config.contract_name.value, config.prefix.data(), config.prefix.size());
+         int32_t itr_stat = internal_use_do_not_use::kv_it_lower_bound(itr, t_key.data(), t_key.size());
+
+         iterator it{itr, static_cast<kv_it_stat>(itr_stat), config};
+
+         auto cmp = internal_use_do_not_use::kv_it_key_compare(it.itr, t_key.data(), t_key.size());
+         if (cmp == 0) {
+            ++it;
+         }
+
+         return it;
+      }
+
+      std::vector<T> range(K&& b, K&& e) {
+         auto begin_itr = lower_bound(std::forward<K>(b));
+         auto end_itr = lower_bound(std::forward<K>(e));
+
+         if (begin_itr == end_itr || begin_itr > end_itr) {
+            return {};
+         }
+
+         std::vector<T> return_values;
+
+         iterator itr = std::move(begin_itr);
+         while(itr < end_itr) {
+            return_values.push_back(itr.value());
+            ++itr;
+         }
+
+         return return_values;
+      }
+   };
+
    /**
     * @ingroup keyvalue
     *
@@ -414,142 +631,6 @@ public:
     * used automatically where possible.
     */
    class kv_index {
-      class iterator {
-      public:
-         iterator(eosio::name contract_name, uint32_t itr, kv_it_stat itr_stat, kv_index* idx) :
-                  contract_name{contract_name}, itr{itr}, itr_stat{itr_stat}, idx{idx} {}
-
-         iterator(iterator&& other) :
-            contract_name(std::move(other.contract_name)),
-            itr(std::exchange(other.itr, 0)),
-            itr_stat(std::move(other.itr_stat)),
-            idx(std::exchange(other.idx, nullptr))
-         {}
-
-         ~iterator() {
-            if (itr) {
-               internal_use_do_not_use::kv_it_destroy(itr);
-            }
-         }
-
-         iterator& operator=(iterator&& other) {
-            contract_name = std::move(other.contract_name);
-            itr = std::exchange(other.itr, itr);
-            itr_stat = std::move(other.itr_stat);
-            idx = std::exchange(other.idx, nullptr);
-
-            return *this;
-         }
-
-         /**
-          * Returns the value that the iterator points to.
-          * @ingroup keyvalue
-          *
-          * @return The value that the iterator points to.
-          */
-         T value() const {
-            using namespace detail;
-
-            eosio::check(itr_stat != kv_it_stat::iterator_end, "Cannot read end iterator");
-
-            uint32_t value_size;
-            uint32_t actual_value_size;
-            uint32_t offset = 0;
-
-            // call once to get the value_size
-            internal_use_do_not_use::kv_it_value(itr, 0, (char*)nullptr, 0, value_size);
-
-            void* buffer = value_size > detail::max_stack_buffer_size ? malloc(value_size) : alloca(value_size);
-            auto stat = internal_use_do_not_use::kv_it_value(itr, offset, (char*)buffer, value_size, actual_value_size);
-
-            eosio::check(static_cast<kv_it_stat>(stat) != kv_it_stat::iterator_end, "Error reading value");
-
-            void* deserialize_buffer = buffer;
-            size_t deserialize_size = actual_value_size;
-
-            if (idx->name != idx->tbl->primary_index->name) {
-               uint32_t actual_data_size;
-               auto success = internal_use_do_not_use::kv_get(idx->tbl->db_name, contract_name.value, (char*)buffer, actual_value_size, actual_data_size);
-               eosio::check(success, "failure getting primary key");
-
-               void* pk_buffer = actual_data_size > detail::max_stack_buffer_size ? malloc(actual_data_size) : alloca(actual_data_size);
-               internal_use_do_not_use::kv_get_data(idx->tbl->db_name, 0, (char*)pk_buffer, actual_data_size);
-
-               deserialize_buffer = pk_buffer;
-               deserialize_size = actual_data_size;
-            }
-
-            T val;
-            deserialize(val, deserialize_buffer, deserialize_size);
-            return val;
-         }
-
-         iterator& operator++() {
-            eosio::check(itr_stat != kv_it_stat::iterator_end, "cannot increment end iterator");
-            itr_stat = static_cast<kv_it_stat>(internal_use_do_not_use::kv_it_next(itr));
-            return *this;
-         }
-
-         iterator& operator--() {
-            if (!itr) {
-               itr = internal_use_do_not_use::kv_it_create(idx->tbl->db_name, contract_name.value, idx->prefix.data(), idx->prefix.size());
-            }
-            itr_stat = static_cast<kv_it_stat>(internal_use_do_not_use::kv_it_prev(itr));
-            eosio::check(itr_stat != kv_it_stat::iterator_end, "decremented past the beginning");
-            return *this;
-         }
-
-         bool operator==(const iterator& b) const {
-            return compare(b) == 0;
-         }
-
-         bool operator!=(const iterator& b) const {
-            return compare(b) != 0;
-         }
-
-         bool operator<(const iterator& b) const {
-            return compare(b) < 0;
-         }
-
-         bool operator<=(const iterator& b) const {
-            return compare(b) <= 0;
-         }
-
-         bool operator>(const iterator& b) const {
-            return compare(b) > 0;
-         }
-
-         bool operator>=(const iterator& b) const {
-            return compare(b) >= 0;
-         }
-
-      private:
-         eosio::name contract_name;
-         const kv_index* idx;
-
-         uint32_t itr;
-         kv_it_stat itr_stat;
-
-         key_type key() const {
-            return idx->get_key(value());
-         }
-
-         int compare(const iterator& b) const {
-            bool a_is_end = !itr || itr_stat == kv_it_stat::iterator_end;
-            bool b_is_end = !b.itr || b.itr_stat == kv_it_stat::iterator_end;
-            if (a_is_end && b_is_end) {
-               return 0;
-            } else if (a_is_end && b.itr) {
-               return 1;
-            } else if (itr && b_is_end) {
-               return -1;
-            } else {
-               return internal_use_do_not_use::kv_it_compare(itr, b.itr);
-            }
-         }
-
-         friend kv_index;
-      };
 
    public:
       eosio::name name{0};
@@ -572,103 +653,6 @@ public:
          };
       }
 
-      /**
-       * Returns an iterator pointing to the element with the lowest key greater than or equal to the given key.
-       * @ingroup keyvalue
-       *
-       * @return An iterator pointing to the element with the lowest key greater than or equal to the given key.
-       */
-      template <typename K>
-      iterator lower_bound(K&& key) {
-         auto t_key = table_key(prefix, make_key(std::forward<K>(key)));
-
-         uint32_t itr = internal_use_do_not_use::kv_it_create(tbl->db_name, contract_name.value, prefix.data(), prefix.size());
-         int32_t itr_stat = internal_use_do_not_use::kv_it_lower_bound(itr, t_key.data(), t_key.size());
-
-         if (static_cast<kv_it_stat>(itr_stat) == kv_it_stat::iterator_end) {
-            internal_use_do_not_use::kv_it_destroy(itr);
-            return end();
-         }
-
-         return {contract_name, itr, static_cast<kv_it_stat>(itr_stat), this};
-      }
-
-      /**
-       * Returns an iterator pointing to the first element greater than the given key.
-       * @ingroup keyvalue
-       *
-       * @return An iterator pointing to the element with the highest key less than or equal to the given key.
-       */
-      template <typename K>
-      iterator upper_bound(K&& key) {
-         auto t_key = table_key(prefix, make_key(std::forward<K>(key)));
-
-         uint32_t itr = internal_use_do_not_use::kv_it_create(tbl->db_name, contract_name.value, prefix.data(), prefix.size());
-         int32_t itr_stat = internal_use_do_not_use::kv_it_lower_bound(itr, t_key.data(), t_key.size());
-
-         iterator it{contract_name, itr, static_cast<kv_it_stat>(itr_stat), this};
-
-         auto cmp = internal_use_do_not_use::kv_it_key_compare(it.itr, t_key.data(), t_key.size());
-         if (cmp == 0) {
-            ++it;
-         }
-
-         return it;
-      }
-
-      /**
-       * Returns an iterator referring to the `past-the-end` element. It does not point to any element, therefore `value` should not be called on it.
-       * @ingroup keyvalue
-       *
-       * @return An iterator referring to the `past-the-end` element.
-       */
-      iterator end() {
-         return {contract_name, 0, kv_it_stat::iterator_end, this};
-      }
-
-      /**
-       * Returns an iterator to the object with the lowest key (by this index) in the table.
-       * @ingroup keyvalue
-       *
-       * @return An iterator to the object with the lowest key (by this index) in the table.
-       */
-      iterator begin() {
-         uint32_t itr = internal_use_do_not_use::kv_it_create(tbl->db_name, contract_name.value, prefix.data(), prefix.size());
-         int32_t itr_stat = internal_use_do_not_use::kv_it_lower_bound(itr, "", 0);
-
-         return {contract_name, itr, static_cast<kv_it_stat>(itr_stat), this};
-      }
-
-      /**
-       * Returns a vector of objects that fall between the specifed range. The range is inclusive, exclusive.
-       * @ingroup keyvalue
-       *
-       * @tparam K - The type of the key. This will be auto-deduced by the key param.
-       *
-       * @param begin - The beginning of the range.
-       * @param end - The end of the range.
-       * @return A vector containing all the objects that fall between the range.
-       */
-      template <typename K>
-      std::vector<T> range(K&& b, K&& e) {
-         auto begin_itr = lower_bound(std::forward<K>(b));
-         auto end_itr = lower_bound(std::forward<K>(e));
-
-         if (begin_itr == end_itr || begin_itr > end_itr) {
-            return {};
-         }
-
-         std::vector<T> return_values;
-
-         iterator itr = std::move(begin_itr);
-         while(itr < end_itr) {
-            return_values.push_back(itr.value());
-            ++itr;
-         }
-
-         return return_values;
-      }
-
       virtual bool is_unique() = 0;
 
    protected:
@@ -686,28 +670,43 @@ public:
       }
    };
 
-   using iterator = typename kv_index::iterator;
-
+public:
+   template <typename K>
    class kv_unique_index : public kv_index {
+      index_config config;
+      kv_index_impl<K> impl;
+
    public:
+      using kv_table<T>::kv_index::tbl;
+      using kv_table<T>::kv_index::contract_name;
+      using kv_table<T>::kv_index::name;
+      using kv_table<T>::kv_index::prefix;
+
       kv_unique_index() = default;
 
       template <typename KF>
-      kv_unique_index(KF&& kf): kv_index{kf} {}
+      kv_unique_index(KF&& kf) : kv_index{kf}, config{tbl->db_name, contract_name, name, tbl->primary_index->name, prefix}, impl{config} {
+#if 0
+         static_assert(std::is_same_v<T, std::remove_cv_t<std::decay_t<decltype(get_return_t(kf))>>>,
+               "Make sure the variable/function passed to the constructor returns the same type as the template parameter.");
+#endif
+      }
 
       template <typename KF>
-      kv_unique_index(eosio::name name, KF&& kf) : kv_index{name, kf} {}
+      kv_unique_index(eosio::name name, KF&& kf) : kv_index{name, kf}, config{tbl->db_name, contract_name, name, tbl->primary_index->name, prefix}, impl{config} {
+#if 0
+         static_assert(std::is_same_v<T, std::remove_cv_t<std::decay_t<decltype(get_return_t(kf))>>>,
+              "Make sure the variable/function passed to the constructor returns the same type as the template parameter.");
+#endif
+      }
 
       /**
        * Search for an existing object in a table by the index, using the given key.
        * @ingroup keyvalue
        *
-       * @tparam K - The type of the key. This will be auto-deduced by the key param.
-       *
        * @param key - The key to search for.
        * @return An iterator to the found object OR the `end` iterator if the given key was not found.
        */
-      template <typename K>
       iterator find(K&& key) {
          auto t_key = table_key(prefix, make_key(std::forward<K>(key)));
 
@@ -721,19 +720,16 @@ public:
             return this->end();
          }
 
-         return {contract_name, itr, static_cast<kv_it_stat>(itr_stat), this};
+         return {itr, static_cast<kv_it_stat>(itr_stat), config};
       }
 
       /**
        * Get the value for an existing object in a table by the index, using the given key.
        * @ingroup keyvalue
        *
-       * @tparam K - The type of the key. This will be auto-deduced by the key param.
-       *
        * @param key - The key to search for.
        * @return A std::optional of the value corresponding to the key.
        */
-      template <typename K>
       std::optional<T> get(K&& key) {
          uint32_t value_size;
          std::optional<T> ret_val;
@@ -773,26 +769,133 @@ public:
          return ret_val;
       }
 
+      /**
+       * Returns an iterator to the object with the lowest key (by this index) in the table.
+       * @ingroup keyvalue
+       *
+       * @return An iterator to the object with the lowest key (by this index) in the table.
+       */
+      iterator begin() {
+         return impl.begin();
+      }
+
+      /**
+       * Returns an iterator referring to the `past-the-end` element. It does not point to any element, therefore `value` should not be called on it.
+       * @ingroup keyvalue
+       *
+       * @return An iterator referring to the `past-the-end` element.
+       */
+      iterator end() {
+         return impl.end();
+      }
+
+      /**
+       * Returns an iterator pointing to the element with the lowest key greater than or equal to the given key.
+       * @ingroup keyvalue
+       *
+       * @return An iterator pointing to the element with the lowest key greater than or equal to the given key.
+       */
+      iterator lower_bound(K&& key) {
+         return impl.lower_bound(std::forward<K>(key));
+      }
+
+      /**
+       * Returns an iterator pointing to the first element greater than the given key.
+       * @ingroup keyvalue
+       *
+       * @return An iterator pointing to the element with the highest key less than or equal to the given key.
+       */
+      iterator upper_bound(K&& key) {
+         return impl.upper_bound(std::forward<K>(key));
+      }
+
+      /**
+       * Returns a vector of objects that fall between the specifed range. The range is inclusive, exclusive.
+       * @ingroup keyvalue
+       *
+       * @param begin - The beginning of the range.
+       * @param end - The end of the range.
+       * @return A vector containing all the objects that fall between the range.
+       */
+      std::vector<T> range(K&& b, K&& e) {
+         return impl.upper_bound(std::forward<K>(b), std::forward<K>(e));
+      }
+
       bool is_unique() override {
          return true;
       }
+   };
+
+   template <typename K>
+   class kv_non_unique_index : public kv_index {
+      index_config config;
+      kv_index_impl<K> impl;
 
       using kv_table<T>::kv_index::tbl;
       using kv_table<T>::kv_index::contract_name;
+      using kv_table<T>::kv_index::name;
       using kv_table<T>::kv_index::prefix;
-   };
 
-   class kv_non_unique_index : public kv_index {
    public:
       kv_non_unique_index() = default;
 
       template <typename KF>
-      kv_non_unique_index(KF&& kf): kv_index{kf} {}
+      kv_non_unique_index(KF&& kf) : kv_index{kf}, config{tbl->db_name, contract_name, name, tbl->primary_index->name, prefix}, impl{config} {}
 
       template <typename KF>
-      kv_non_unique_index(eosio::name name, KF&& kf) : kv_index{name, kf} {}
+      kv_non_unique_index(eosio::name name, KF&& kf) : kv_index{name, kf}, config{tbl->db_name, contract_name, name, tbl->primary_index->name, prefix}, impl{config} {}
 
-      using kv_table<T>::kv_index::tbl;
+      /**
+       * Returns an iterator to the object with the lowest key (by this index) in the table.
+       * @ingroup keyvalue
+       *
+       * @return An iterator to the object with the lowest key (by this index) in the table.
+       */
+      iterator begin() {
+         return impl.begin();
+      }
+
+      /**
+       * Returns an iterator referring to the `past-the-end` element. It does not point to any element, therefore `value` should not be called on it.
+       * @ingroup keyvalue
+       *
+       * @return An iterator referring to the `past-the-end` element.
+       */
+      iterator end() {
+         return impl.end();
+      }
+
+      /**
+       * Returns an iterator pointing to the element with the lowest key greater than or equal to the given key.
+       * @ingroup keyvalue
+       *
+       * @return An iterator pointing to the element with the lowest key greater than or equal to the given key.
+       */
+      iterator lower_bound(K&& key) {
+         return impl.lower_bound(std::forward<K>(key));
+      }
+
+      /**
+       * Returns an iterator pointing to the first element greater than the given key.
+       * @ingroup keyvalue
+       *
+       * @return An iterator pointing to the element with the highest key less than or equal to the given key.
+       */
+      iterator upper_bound(K&& key) {
+         return impl.upper_bound(std::forward<K>(key));
+      }
+
+      /**
+       * Returns a vector of objects that fall between the specifed range. The range is inclusive, exclusive.
+       * @ingroup keyvalue
+       *
+       * @param begin - The beginning of the range.
+       * @param end - The end of the range.
+       * @return A vector containing all the objects that fall between the range.
+       */
+      std::vector<T> range(K&& b, K&& e) {
+         return impl.range(std::forward<K>(b), std::forward<K>(e));
+      }
 
       bool is_unique() override {
          return false;
@@ -808,6 +911,8 @@ public:
     * A null_kv_index should be created in this case. If using DEFINE_TABLE, just passing in nullptr will handle this.
     */
    class null_kv_index : public kv_index {
+      kv_index_impl<size_t> impl;
+
    public:
       template <typename KF>
       null_kv_index(KF&& kf): kv_index{kf} {}
@@ -957,7 +1062,7 @@ protected:
 
       eosio::check(primary.is_unique(), "primary index should be kv_unique_index");
 
-      primary_index = (kv_unique_index*)&primary;
+      primary_index = &primary;
       primary_index->contract_name = contract_name;
       primary_index->table_name = table_name;
       primary_index->tbl = this;
@@ -1001,13 +1106,20 @@ private:
    uint64_t db_name;
 
 
-   kv_unique_index* primary_index;
+   kv_index* primary_index;
    std::vector<kv_index*> secondary_indices;
 
    template <size_t I, typename U>
    constexpr static auto& get(U& u) {
+#if 0
       constexpr size_t kv_index_size = sizeof(kv_index);
       static_assert(sizeof(U) % kv_index_size == 0);
+      kv_index* indices = (kv_index*)(&u);
+      return indices[I];
+#endif
+      constexpr size_t kv_unique_index_size = sizeof(kv_unique_index<size_t>);
+      constexpr size_t kv_non_unique_index_size = sizeof(kv_non_unique_index<size_t>);
+      static_assert(sizeof(U) % kv_unique_index_size == 0 || sizeof(U) % kv_non_unique_index_size == 0);
       kv_index* indices = (kv_index*)(&u);
       return indices[I];
    }
@@ -1024,10 +1136,22 @@ private:
 
    template <typename U, typename F>
    constexpr static void for_each_field(U& u, F&& f) {
+#if 0
       constexpr size_t kv_index_size = sizeof(kv_index);
       static_assert(sizeof(U) % kv_index_size == 0);
       constexpr size_t num_elems = (sizeof(U) / sizeof(kv_index)) - 1;
       for_each_field<num_elems>(u, f);
+#endif
+      constexpr size_t kv_unique_index_size = sizeof(kv_unique_index<size_t>);
+      constexpr size_t kv_non_unique_index_size = sizeof(kv_non_unique_index<size_t>);
+      static_assert(sizeof(U) % kv_unique_index_size == 0 || sizeof(U) % kv_non_unique_index_size == 0);
+      if constexpr(sizeof(U) % kv_unique_index_size == 0) {
+         constexpr size_t num_elems = (sizeof(U) / kv_unique_index_size) - 1;
+         for_each_field<num_elems>(u, f);
+      } else if constexpr(sizeof(U) % kv_non_unique_index_size == 0) {
+         constexpr size_t num_elems = (sizeof(U) / kv_non_unique_index_size) - 1;
+         for_each_field<num_elems>(u, f);
+      }
    }
 
    template <typename V>

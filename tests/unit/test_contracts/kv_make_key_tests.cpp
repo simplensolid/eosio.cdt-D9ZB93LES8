@@ -37,16 +37,16 @@ struct my_struct {
 
 struct my_table : eosio::kv_table<my_struct> {
    struct {
-      kv_unique_index tname{&my_struct::tname};
-      kv_non_unique_index tstring{&my_struct::tstring};
-      kv_non_unique_index tui64{&my_struct::tui64};
-      kv_non_unique_index ti32{&my_struct::ti32};
-      kv_non_unique_index tui128{&my_struct::tui128};
-      kv_non_unique_index tfloat{&my_struct::tfloat};
-      kv_non_unique_index tdouble{&my_struct::tdouble};
-      kv_non_unique_index tstruct{&my_struct::tstruct};
-      kv_non_unique_index ttuple{&my_struct::ttuple};
-      kv_non_unique_index itstring{&my_struct::itstring};
+      kv_unique_index<eosio::name>                                  tname{&my_struct::tname};
+      kv_non_unique_index<std::string>                              tstring{&my_struct::tstring};
+      kv_non_unique_index<uint64_t>                                 tui64{&my_struct::tui64};
+      kv_non_unique_index<int32_t>                                  ti32{&my_struct::ti32};
+      kv_non_unique_index<uint128_t>                                tui128{&my_struct::tui128};
+      kv_non_unique_index<float>                                    tfloat{&my_struct::tfloat};
+      kv_non_unique_index<double>                                   tdouble{&my_struct::tdouble};
+      kv_non_unique_index<testing_struct>                           tstruct{&my_struct::tstruct};
+      kv_non_unique_index<std::tuple<uint64_t, float, std::string>> ttuple{&my_struct::ttuple};
+      kv_non_unique_index<eosio::key_type>                          itstring{&my_struct::itstring};
    } index;
 
    my_table(eosio::name contract_name) {
@@ -58,9 +58,11 @@ class [[eosio::contract]] kv_make_key_tests : public eosio::contract {
 public:
    using contract::contract;
 
-   void check_index(my_table::kv_index& idx, const std::vector<my_struct>& expected) {
+   template <typename I>
+   void check_index(I& idx, const std::vector<my_struct>& expected) {
       auto end_itr = idx.end();
       auto itr = idx.begin();
+
       for (const auto& expect : expected) {
          eosio::check(itr != end_itr, "Should not be the end");
          eosio::check(itr.value() == expect, "Got the wrong value");
