@@ -576,8 +576,8 @@ class kv_table {
          return {0, kv_it_stat::iterator_end, config};
       }
 
-      iterator lower_bound(K&& key) {
-         auto t_key = table_key(config.prefix, make_key(std::forward<K>(key)));
+      iterator lower_bound(const K& key) {
+         auto t_key = table_key(config.prefix, make_key(key));
 
          uint32_t itr = internal_use_do_not_use::kv_it_create(config.db_name, config.contract_name.value, config.prefix.data(), config.prefix.size());
          int32_t itr_stat = internal_use_do_not_use::kv_it_lower_bound(itr, t_key.data(), t_key.size());
@@ -590,8 +590,8 @@ class kv_table {
          return {itr, static_cast<kv_it_stat>(itr_stat), config};
       }
 
-      iterator upper_bound(K&& key) {
-         auto t_key = table_key(config.prefix, make_key(std::forward<K>(key)));
+      iterator upper_bound(const K& key) {
+         auto t_key = table_key(config.prefix, make_key(key));
 
          uint32_t itr = internal_use_do_not_use::kv_it_create(config.db_name, config.contract_name.value, config.prefix.data(), config.prefix.size());
          int32_t itr_stat = internal_use_do_not_use::kv_it_lower_bound(itr, t_key.data(), t_key.size());
@@ -606,9 +606,64 @@ class kv_table {
          return it;
       }
 
-      std::vector<T> range(K&& b, K&& e) {
-         auto begin_itr = lower_bound(std::forward<K>(b));
-         auto end_itr = lower_bound(std::forward<K>(e));
+      iterator find(const K& key) {
+         auto t_key = table_key(config.prefix, make_key(key));
+
+         uint32_t itr = internal_use_do_not_use::kv_it_create(config.db_name, config.contract_name.value, config.prefix.data(), config.prefix.size());
+         int32_t itr_stat = internal_use_do_not_use::kv_it_lower_bound(itr, t_key.data(), t_key.size());
+
+         auto cmp = internal_use_do_not_use::kv_it_key_compare(itr, t_key.data(), t_key.size());
+
+         if (cmp != 0) {
+            internal_use_do_not_use::kv_it_destroy(itr);
+            return this->end();
+         }
+
+         return {itr, static_cast<kv_it_stat>(itr_stat), config};
+      }
+
+      std::optional<T> get(const K& key) {
+         uint32_t value_size;
+         std::optional<T> ret_val;
+
+         auto t_key = table_key(config.prefix, make_key(key));
+
+         auto success = internal_use_do_not_use::kv_get(config.db_name, config.contract_name.value, t_key.data(), t_key.size(), value_size);
+         if (!success) {
+            return ret_val;
+         }
+
+         void* buffer = value_size > detail::max_stack_buffer_size ? malloc(value_size) : alloca(value_size);
+         auto copy_size = internal_use_do_not_use::kv_get_data(config.db_name, 0, (char*)buffer, value_size);
+
+         void* deserialize_buffer = buffer;
+         size_t deserialize_size = copy_size;
+
+         if (config.index_name != config.primary_index_name) {
+            uint32_t actual_data_size;
+            auto success = internal_use_do_not_use::kv_get(config.db_name, config.contract_name.value, (char*)buffer, copy_size, actual_data_size);
+            eosio::check(success, "failure getting primary key");
+
+            void* pk_buffer = actual_data_size > detail::max_stack_buffer_size ? malloc(actual_data_size) : alloca(actual_data_size);
+            auto pk_copy_size = internal_use_do_not_use::kv_get_data(config.db_name, 0, (char*)pk_buffer, actual_data_size);
+
+            deserialize_buffer = pk_buffer;
+            deserialize_size = pk_copy_size;
+         }
+
+         ret_val.emplace();
+         deserialize(*ret_val, deserialize_buffer, deserialize_size);
+
+         if (value_size > detail::max_stack_buffer_size) {
+            free(buffer);
+         }
+
+         return ret_val;
+      }
+
+      std::vector<T> range(const K& b, const K& e) {
+         auto begin_itr = lower_bound(b);
+         auto end_itr = lower_bound(e);
 
          if (begin_itr == end_itr || begin_itr > end_itr) {
             return {};
@@ -676,6 +731,9 @@ class kv_table {
    };
 
 public:
+
+   using iterator = kv_table::iterator;
+
    template <typename K>
    class kv_unique_index : public kv_index {
       index_config config;
@@ -712,20 +770,8 @@ public:
        * @param key - The key to search for.
        * @return An iterator to the found object OR the `end` iterator if the given key was not found.
        */
-      iterator find(K&& key) {
-         auto t_key = table_key(prefix, make_key(std::forward<K>(key)));
-
-         uint32_t itr = internal_use_do_not_use::kv_it_create(tbl->db_name, contract_name.value, prefix.data(), prefix.size());
-         int32_t itr_stat = internal_use_do_not_use::kv_it_lower_bound(itr, t_key.data(), t_key.size());
-
-         auto cmp = internal_use_do_not_use::kv_it_key_compare(itr, t_key.data(), t_key.size());
-
-         if (cmp != 0) {
-            internal_use_do_not_use::kv_it_destroy(itr);
-            return this->end();
-         }
-
-         return {itr, static_cast<kv_it_stat>(itr_stat), config};
+      iterator find(const K& key) {
+         return impl.find(key);
       }
 
       /**
@@ -735,43 +781,8 @@ public:
        * @param key - The key to search for.
        * @return A std::optional of the value corresponding to the key.
        */
-      std::optional<T> get(K&& key) {
-         uint32_t value_size;
-         std::optional<T> ret_val;
-
-         auto t_key = table_key(prefix, make_key(std::forward<K>(key)));
-
-         auto success = internal_use_do_not_use::kv_get(tbl->db_name, contract_name.value, t_key.data(), t_key.size(), value_size);
-         if (!success) {
-            return ret_val;
-         }
-
-         void* buffer = value_size > detail::max_stack_buffer_size ? malloc(value_size) : alloca(value_size);
-         auto copy_size = internal_use_do_not_use::kv_get_data(tbl->db_name, 0, (char*)buffer, value_size);
-
-         void* deserialize_buffer = buffer;
-         size_t deserialize_size = copy_size;
-
-         if (this->name != tbl->primary_index->name) {
-            uint32_t actual_data_size;
-            auto success = internal_use_do_not_use::kv_get(tbl->db_name, contract_name.value, (char*)buffer, copy_size, actual_data_size);
-            eosio::check(success, "failure getting primary key");
-
-            void* pk_buffer = actual_data_size > detail::max_stack_buffer_size ? malloc(actual_data_size) : alloca(actual_data_size);
-            auto pk_copy_size = internal_use_do_not_use::kv_get_data(tbl->db_name, 0, (char*)pk_buffer, actual_data_size);
-
-            deserialize_buffer = pk_buffer;
-            deserialize_size = pk_copy_size;
-         }
-
-         ret_val.emplace();
-         deserialize(*ret_val, deserialize_buffer, deserialize_size);
-
-         if (value_size > detail::max_stack_buffer_size) {
-            free(buffer);
-         }
-
-         return ret_val;
+      std::optional<T> get(const K& key) {
+         return impl.get(key);
       }
 
       /**
@@ -800,8 +811,8 @@ public:
        *
        * @return An iterator pointing to the element with the lowest key greater than or equal to the given key.
        */
-      iterator lower_bound(K&& key) {
-         return impl.lower_bound(std::forward<K>(key));
+      iterator lower_bound(const K& key) {
+         return impl.lower_bound(key);
       }
 
       /**
@@ -810,8 +821,8 @@ public:
        *
        * @return An iterator pointing to the element with the highest key less than or equal to the given key.
        */
-      iterator upper_bound(K&& key) {
-         return impl.upper_bound(std::forward<K>(key));
+      iterator upper_bound(const K& key) {
+         return impl.upper_bound(key);
       }
 
       /**
@@ -822,8 +833,8 @@ public:
        * @param end - The end of the range.
        * @return A vector containing all the objects that fall between the range.
        */
-      std::vector<T> range(K&& b, K&& e) {
-         return impl.upper_bound(std::forward<K>(b), std::forward<K>(e));
+      std::vector<T> range(const K& b, const K& e) {
+         return impl.range(b, e);
       }
 
       bool is_unique() override {
@@ -836,12 +847,12 @@ public:
       index_config config;
       kv_index_impl<K> impl;
 
+   public:
       using kv_table<T>::kv_index::tbl;
       using kv_table<T>::kv_index::contract_name;
       using kv_table<T>::kv_index::name;
       using kv_table<T>::kv_index::prefix;
 
-   public:
       kv_non_unique_index() = default;
 
       template <typename KF>
@@ -876,8 +887,8 @@ public:
        *
        * @return An iterator pointing to the element with the lowest key greater than or equal to the given key.
        */
-      iterator lower_bound(K&& key) {
-         return impl.lower_bound(std::forward<K>(key));
+      iterator lower_bound(const K& key) {
+         return impl.lower_bound(key);
       }
 
       /**
@@ -886,8 +897,8 @@ public:
        *
        * @return An iterator pointing to the element with the highest key less than or equal to the given key.
        */
-      iterator upper_bound(K&& key) {
-         return impl.upper_bound(std::forward<K>(key));
+      iterator upper_bound(const K& key) {
+         return impl.upper_bound(key);
       }
 
       /**
@@ -898,8 +909,8 @@ public:
        * @param end - The end of the range.
        * @return A vector containing all the objects that fall between the range.
        */
-      std::vector<T> range(K&& b, K&& e) {
-         return impl.range(std::forward<K>(b), std::forward<K>(e));
+      std::vector<T> range(const K& b, const K& e) {
+         return impl.range(b, e);
       }
 
       bool is_unique() override {
@@ -1018,7 +1029,15 @@ public:
     */
    template <typename K>
    void erase(const K& key) {
-      auto primary_value = primary_index->get(key);
+      // TODO: Need a replacement for this.
+      // Maybe we take a value or an iterator instead?
+      //
+      // Move get and find to kv_impl
+      // Instantiate impl here and use it to get before the delete.
+      //
+      // auto primary_value = primary_index->get(key);
+      kv_index_impl<K> impl{{db_name, contract_name, primary_index->name, primary_index->name, primary_index->prefix}};
+      auto primary_value = impl.get(key);
 
       if (!primary_value) {
          return;
