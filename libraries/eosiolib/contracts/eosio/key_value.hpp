@@ -10,6 +10,7 @@
 #include <functional>
 
 #include <boost/preprocessor/control/if.hpp>
+#include <boost/preprocessor/seq/for_each.hpp>
 #include <boost/preprocessor/seq/for_each_i.hpp>
 #include <boost/preprocessor/variadic/to_seq.hpp>
 #include <boost/pfr.hpp>
@@ -61,8 +62,14 @@
 #define EOSIO_CDT_CREATE_KV_INDEX(r, value_class, i, index_name)                                                       \
    BOOST_PP_IF(i, EOSIO_CDT_CREATE_KV_NON_UNIQUE_INDEX, EOSIO_CDT_CREATE_KV_UNIQUE_INDEX)(r, value_class, i, index_name)
 
-#define EOSIO_CDT_LIST_INDICES(value_class, ...)                                                                       \
+#define EOSIO_CDT_CREATE_KV_INDICES(value_class, ...)                                                                  \
    BOOST_PP_SEQ_FOR_EACH_I(EOSIO_CDT_CREATE_KV_INDEX, value_class, BOOST_PP_VARIADIC_TO_SEQ(__VA_ARGS__))
+
+#define EOSIO_CDT_LIST_KV_INDEX(r, data, index_name)                                                                   \
+   ,&index_name
+
+#define EOSIO_CDT_LIST_KV_INDICES(...)                                                                                 \
+   BOOST_PP_SEQ_FOR_EACH(EOSIO_CDT_LIST_KV_INDEX, _, BOOST_PP_VARIADIC_TO_SEQ(__VA_ARGS__))
 
 /**
  * @brief Macro to define a table.
@@ -77,12 +84,10 @@
  */
 #define DEFINE_TABLE(table_class, value_class, table_name, db_name, /*indices*/...)                                    \
    struct table_class : eosio::kv_table<value_class> {                                                                 \
-      struct {                                                                                                         \
-         EOSIO_CDT_LIST_INDICES(value_class, __VA_ARGS__)                                                              \
-      } index;                                                                                                         \
+      EOSIO_CDT_CREATE_KV_INDICES(value_class, __VA_ARGS__)                                                            \
                                                                                                                        \
       table_class(eosio::name contract_name) {                                                                         \
-         init(contract_name, table_name##_n, db_name##_n, &index);                                                     \
+         init(contract_name, table_name##_n, db_name##_n EOSIO_CDT_LIST_KV_INDICES(__VA_ARGS__));                      \
       }                                                                                                                \
    };
 
@@ -934,6 +939,42 @@ public:
 protected:
    kv_table() = default;
 
+   template <typename I, typename... Indices>
+   void setup_indices(uint64_t index_name, bool is_named, I index, Indices... indices) {
+      index->contract_name = contract_name;
+      index->table_name = table_name;
+      index->tbl = this;
+
+      if (is_named) {
+         eosio::check(index->name.value > 0, "All indices must be named if one is named.");
+      } else {
+         eosio::check(index->name.value <= 0, "All indices must be named if one is named.");
+         index->name = eosio::name{index_name};
+      }
+
+      index->set_prefix();
+      secondary_indices.push_back(index);
+      ++index_name;
+      setup_indices(index_name, is_named, indices...);
+   }
+
+   template <typename I>
+   void setup_indices(uint64_t index_name, bool is_named, I index) {
+      index->contract_name = contract_name;
+      index->table_name = table_name;
+      index->tbl = this;
+
+      if (is_named) {
+         eosio::check(index->name.value > 0, "All indices must be named if one is named.");
+      } else {
+         eosio::check(index->name.value <= 0, "All indices must be named if one is named.");
+         index->name = eosio::name{index_name};
+      }
+
+      index->set_prefix();
+      secondary_indices.push_back(index);
+   }
+
    /**
     * Initializes a key value table. This method is intended to be called in the constructor of the user defined table class.
     * If using the DEFINE_TABLE macro, this is handled for the developer.
@@ -944,8 +985,8 @@ protected:
     * @param contract - the name of the contract this table is associated with
     * @param indices - a list of 1 or more indices to add to the table
     */
-   template <typename Indices>
-   void init(eosio::name contract, eosio::name table, eosio::name db, Indices indices) {
+   template <typename... SecondaryIndices>
+   void init(eosio::name contract, eosio::name table, eosio::name db, kv_unique_index* prim_index, SecondaryIndices... indices) {
       contract_name = contract;
       table_name = table;
       db_name = db.value;
@@ -953,11 +994,7 @@ protected:
       bool is_named = false;
       uint64_t index_name = 1;
 
-      auto& primary = get<0>(*indices);
-
-      eosio::check(primary.is_unique(), "primary index should be kv_unique_index");
-
-      primary_index = (kv_unique_index*)&primary;
+      primary_index = prim_index;
       primary_index->contract_name = contract_name;
       primary_index->table_name = table_name;
       primary_index->tbl = this;
@@ -966,33 +1003,14 @@ protected:
          is_named = true;
       } else {
          primary_index->name = eosio::name{index_name};
+         ++index_name;
       }
 
       primary_index->set_prefix();
-      ++index_name;
 
-      for_each_field(*indices, [&](auto& idx) {
-         if (idx.name != primary.name) {
-            kv_index* si = &idx;
-            si->contract_name = contract_name;
-            si->table_name = table_name;
-            si->tbl = this;
-
-            if (is_named) {
-               eosio::check(si->name.value > 0, "All indices must be named if one is named.");
-            } else {
-               eosio::check(si->name.value <= 0, "All indices must be named if one is named.");
-               si->name = eosio::name{index_name};
-            }
-            si->set_prefix();
-            secondary_indices.push_back(si);
-            ++index_name;
-         }
-      });
-
-      // Makes sure the indexes are run in the correct order.
-      // This is mainly useful for debugging, this probably could be deleted.
-      std::reverse(std::begin(secondary_indices), std::end(secondary_indices));
+      if constexpr (sizeof...(indices) > 0) {
+         setup_indices(index_name, is_named, indices...);
+      }
    }
 
 private:
@@ -1003,32 +1021,6 @@ private:
 
    kv_unique_index* primary_index;
    std::vector<kv_index*> secondary_indices;
-
-   template <size_t I, typename U>
-   constexpr static auto& get(U& u) {
-      constexpr size_t kv_index_size = sizeof(kv_index);
-      static_assert(sizeof(U) % kv_index_size == 0);
-      kv_index* indices = (kv_index*)(&u);
-      return indices[I];
-   }
-
-   template <size_t S, typename U, typename F>
-   constexpr static void for_each_field(U& u, F&& f) {
-      f(get<S>(u));
-      if constexpr (S <= 0) {
-         return;
-      } else {
-         for_each_field<S-1>(u, f);
-      }
-   }
-
-   template <typename U, typename F>
-   constexpr static void for_each_field(U& u, F&& f) {
-      constexpr size_t kv_index_size = sizeof(kv_index);
-      static_assert(sizeof(U) % kv_index_size == 0);
-      constexpr size_t num_elems = (sizeof(U) / sizeof(kv_index)) - 1;
-      for_each_field<num_elems>(u, f);
-   }
 
    template <typename V>
    static void serialize(const V& value, void* buffer, size_t size) {
