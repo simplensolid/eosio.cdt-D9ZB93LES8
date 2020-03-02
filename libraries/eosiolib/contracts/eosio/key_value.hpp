@@ -1090,8 +1090,8 @@ protected:
     * @param contract - the name of the contract this table is associated with
     * @param indices - a list of 1 or more indices to add to the table
     */
-   template <typename... SecondaryIndices>
-   void init(eosio::name contract, eosio::name table, eosio::name db, kv_unique_index* prim_index, SecondaryIndices... indices) {
+   template <typename PrimaryIndex, typename... SecondaryIndices>
+   void init(eosio::name contract, eosio::name table, eosio::name db, PrimaryIndex prim_index, SecondaryIndices... indices) {
       contract_name = contract;
       table_name = table;
       db_name = db.value;
