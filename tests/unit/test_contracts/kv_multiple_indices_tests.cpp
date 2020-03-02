@@ -15,70 +15,50 @@ struct my_struct {
 };
 
 struct my_table : eosio::kv_table<my_struct> {
-   struct {
-      kv_unique_index<eosio::name>     primary_key{&my_struct::primary_key};
-      kv_non_unique_index<std::string> foo{&my_struct::foo};
-      kv_unique_index<uint64_t>        bar{&my_struct::bar};
-      kv_non_unique_index<int32_t>     baz{&my_struct::baz};
-   } index;
+   kv_unique_index<eosio::name>     primary_key{&my_struct::primary_key};
+   kv_non_unique_index<std::string> foo{&my_struct::foo};
+   kv_unique_index<uint64_t>        bar{&my_struct::bar};
+   kv_non_unique_index<int32_t>     baz{&my_struct::baz};
 
    my_table(eosio::name contract_name) {
-      init(contract_name, "testtable"_n, "eosio.kvram"_n, &index);
+      init(contract_name, "testtable"_n, "eosio.kvram"_n, &primary_key, &foo, &bar, &baz);
    }
 };
 
 struct my_table2 : eosio::kv_table<my_struct> {
-   struct {
-      kv_unique_index<eosio::name>  primary_key{&my_struct::primary_key};
-      null_kv_index                 nullptr_2{&my_struct::foo};
-      kv_non_unique_index<uint64_t> bar{&my_struct::bar};
-   } index;
+   kv_unique_index<eosio::name>  primary_key{&my_struct::primary_key};
+   null_kv_index                 nullptr_2{&my_struct::foo};
+   kv_non_unique_index<uint64_t> bar{&my_struct::bar};
 
    my_table2(eosio::name contract_name) {
-      init(contract_name, "testtable"_n, "eosio.kvram"_n, &index);
+      init(contract_name, "testtable"_n, "eosio.kvram"_n, &primary_key, &nullptr_2, &bar);
    }
 };
 
 struct my_table_idx : eosio::kv_table<my_struct> {
-   struct {
-      kv_unique_index<eosio::name>     primary_key{"prim"_n, &my_struct::primary_key};
-      kv_non_unique_index<std::string> foo{"f"_n, &my_struct::foo};
-   } index;
+   kv_unique_index<eosio::name>     primary_key{"prim"_n, &my_struct::primary_key};
+   kv_non_unique_index<std::string> foo{"f"_n, &my_struct::foo};
 
    my_table_idx(eosio::name contract_name) {
-      init(contract_name, "testtable"_n, "eosio.kvram"_n, &index);
+      init(contract_name, "testtable"_n, "eosio.kvram"_n, &primary_key, &foo);
    }
 };
 
 struct my_table_idx_err : eosio::kv_table<my_struct> {
-   struct {
-      kv_unique_index<eosio::name>     primary_key{"prim"_n, &my_struct::primary_key};
-      kv_non_unique_index<std::string> foo{&my_struct::foo};
-   } index;
+   kv_unique_index<eosio::name>     primary_key{"prim"_n, &my_struct::primary_key};
+   kv_non_unique_index<std::string> foo{&my_struct::foo};
 
    my_table_idx_err(eosio::name contract_name) {
-      init(contract_name, "testtable"_n, "eosio.kvram"_n, &index);
+      init(contract_name, "testtable"_n, "eosio.kvram"_n, &primary_key, &foo);
    }
 };
 
 struct my_table_idx_err_2 : eosio::kv_table<my_struct> {
-   struct {
-      kv_unique_index<eosio::name>     primary_key{&my_struct::primary_key};
-      kv_non_unique_index<std::string> foo{"f"_n, &my_struct::foo};
-   } index;
+   kv_unique_index<eosio::name>     primary_key{&my_struct::primary_key};
+   kv_non_unique_index<std::string> foo{"f"_n, &my_struct::foo};
 
    my_table_idx_err_2(eosio::name contract_name) {
-      init(contract_name, "testtable"_n, "eosio.kvram"_n, &index);
-   }
-};
-
-struct my_table_idx_err_3 : eosio::kv_table<my_struct> {
-   struct {
-      kv_non_unique_index<eosio::name> primary_key{&my_struct::primary_key};
-   } index;
-
-   my_table_idx_err_3(eosio::name contract_name) {
-      init(contract_name, "testtable"_n, "eosio.kvram"_n, &index);
+      init(contract_name, "testtable"_n, "eosio.kvram"_n, &primary_key, &foo);
    }
 };
 
@@ -143,22 +123,17 @@ public:
    }
 
    [[eosio::action]]
-   void indiceserr3() {
-      my_table_idx_err_3 t{"kvtest"_n};
-   }
-
-   [[eosio::action]]
    void iteration() {
       my_table t{"kvtest"_n};
 
-      auto foo_begin_itr = t.index.foo.begin();
-      auto foo_end_itr = t.index.foo.end();
+      auto foo_begin_itr = t.foo.begin();
+      auto foo_end_itr = t.foo.end();
 
-      auto bar_begin_itr = t.index.bar.begin();
-      auto bar_end_itr = t.index.bar.end();
+      auto bar_begin_itr = t.bar.begin();
+      auto bar_end_itr = t.bar.end();
 
-      auto foo_itr = t.index.foo.begin();
-      auto bar_itr = t.index.bar.begin();
+      auto foo_itr = t.foo.begin();
+      auto bar_itr = t.bar.begin();
 
       eosio::check(foo_itr != foo_end_itr, "Should not be the end");
       eosio::check(bar_itr != bar_end_itr, "Should not be the end");
@@ -221,7 +196,7 @@ public:
       my_table t{"kvtest"_n};
 
       std::vector<my_struct> expected = {s2, s5, s4, s3, s1};
-      auto actual = t.index.baz.range(1l, 3l);
+      auto actual = t.baz.range(1l, 3l);
 
       eosio::check(actual == expected, "range did not return expected vector");
    }

@@ -115,9 +115,6 @@ BOOST_FIXTURE_TEST_CASE(multi_tests_idx, tester) try {
     BOOST_CHECK_EXCEPTION(push_action(N(kvtest), N(indiceserr2), N(kvtest), {}),
                           eosio_assert_message_exception,
                           eosio_assert_message_is("All indices must be named if one is named."));
-    BOOST_CHECK_EXCEPTION(push_action(N(kvtest), N(indiceserr3), N(kvtest), {}),
-                          eosio_assert_message_exception,
-                          eosio_assert_message_is("primary index should be kv_unique_index"));
 } FC_LOG_AND_RETHROW()
 
 BOOST_FIXTURE_TEST_CASE(multi_tests_iteration, tester) try {
