@@ -25,7 +25,7 @@
 #define EOSIO_CDT_CAT(x, y) EOSIO_CDT_CAT2(x, y)
 #define EOSIO_CDT_APPLY(f, args) f args
 
-#define EOSIO_CDT_GET_RETURN_T(value_class, index_name) std::remove_cv_t<std::decay_t<decltype(get_return_t(&value_class::index_name))>>
+#define EOSIO_CDT_GET_RETURN_T(value_class, index_name) std::remove_cv_t<std::decay_t<decltype(std::invoke(&value_class::index_name, std::declval<const value_class*>()))>>
 
 #define EOSIO_CDT_KV_FIX_INDEX_NAME_0(index_name, i) index_name
 #define EOSIO_CDT_KV_FIX_INDEX_NAME_1(index_name, i) index_name ## i
@@ -146,17 +146,6 @@ namespace eosio {
 namespace detail {
    constexpr inline size_t max_stack_buffer_size = 512;
 }
-
-/* @cond PRIVATE */
-template <typename R, typename Cls, typename... Args>
-auto get_return_t(R (Cls::*)(Args...)) -> R;
-
-template <typename R, typename Cls, typename... Args>
-auto get_return_t(R (Cls::*)(Args...) const) -> R;
-
-template <typename R, typename Cls, typename... Args>
-auto get_return_t(R (Cls::*)) -> R;
-/* @endcond */
 
 /**
  * The key_type struct is used to store the binary representation of a key.
@@ -511,8 +500,7 @@ class kv_table {
          return *this;
       }
 
-      // TODO: Is there a better option?
-      uint32_t key_compare(key_type kt) {
+      uint32_t key_compare(key_type kt) const {
          return internal_use_do_not_use::kv_it_key_compare(itr, kt.data(), kt.size());
       }
 
@@ -605,7 +593,6 @@ class kv_table {
 
          iterator it{itr, static_cast<kv_it_stat>(itr_stat), config};
 
-         // auto cmp = internal_use_do_not_use::kv_it_key_compare(it.itr, t_key.data(), t_key.size());
          auto cmp = it.key_compare(t_key);
          if (cmp == 0) {
             ++it;
@@ -701,7 +688,7 @@ class kv_table {
    class kv_index {
 
    public:
-      eosio::name name{0};
+      eosio::name index_name{0};
       eosio::name table_name;
       eosio::name contract_name;
 
@@ -715,7 +702,7 @@ class kv_table {
       }
 
       template <typename KF>
-      kv_index(eosio::name name, KF&& kf) : name{name} {
+      kv_index(eosio::name index_name, KF&& kf) : index_name{index_name} {
          key_function = [=](const T& t) {
             return make_key(std::invoke(kf, &t));
          };
@@ -738,9 +725,9 @@ class kv_table {
 
 public:
 
-   //using iterator = kv_table<T>::kv_index_impl::iterator;
    using iterator = kv_table::iterator;
 
+   // TODO: Investigate CRTP
    template <typename K>
    class kv_unique_index : public kv_index {
       kv_index_impl<K> impl;
@@ -749,27 +736,21 @@ public:
       using kv_table<T>::kv_index::tbl;
       using kv_table<T>::kv_index::table_name;
       using kv_table<T>::kv_index::contract_name;
-      using kv_table<T>::kv_index::name;
+      using kv_table<T>::kv_index::index_name;
       using kv_table<T>::kv_index::prefix;
 
       kv_unique_index() = default;
 
       template <typename KF>
       kv_unique_index(KF&& kf) : kv_index{kf} {
-         // TODO: Add this back in once get_return_t handles lambdas correctly.
-         #if 0
-         static_assert(std::is_same_v<K, std::remove_cv_t<std::decay_t<decltype(get_return_t(kf))>>>,
+         static_assert(std::is_same_v<K, std::remove_cv_t<std::decay_t<decltype(std::invoke(kf, std::declval<const T*>()))>>>,
                "Make sure the variable/function passed to the constructor returns the same type as the template parameter.");
-         #endif
       }
 
       template <typename KF>
       kv_unique_index(eosio::name name, KF&& kf) : kv_index{name, kf} {
-         // TODO: Add this back in once get_return_t handles lambdas correctly.
-         #if 0
-         static_assert(std::is_same_v<K, std::remove_cv_t<std::decay_t<decltype(get_return_t(kf))>>>,
-              "Make sure the variable/function passed to the constructor returns the same type as the template parameter.");
-         #endif
+         static_assert(std::is_same_v<K, std::remove_cv_t<std::decay_t<decltype(std::invoke(kf, std::declval<const T*>()))>>>,
+               "Make sure the variable/function passed to the constructor returns the same type as the template parameter.");
       }
 
       /**
@@ -851,12 +832,12 @@ public:
       }
 
       void setup() override {
-         prefix = make_prefix(table_name, name);
+         prefix = make_prefix(table_name, index_name);
          impl.config = {
             .db_name            = tbl->db_name,
             .contract_name      = contract_name,
-            .index_name         = name,
-            .primary_index_name = tbl->primary_index->name,
+            .index_name         = index_name,
+            .primary_index_name = tbl->primary_index->index_name,
             .prefix             = prefix
          };
 
@@ -871,16 +852,22 @@ public:
       using kv_table<T>::kv_index::tbl;
       using kv_table<T>::kv_index::table_name;
       using kv_table<T>::kv_index::contract_name;
-      using kv_table<T>::kv_index::name;
+      using kv_table<T>::kv_index::index_name;
       using kv_table<T>::kv_index::prefix;
 
       kv_non_unique_index() = default;
 
       template <typename KF>
-      kv_non_unique_index(KF&& kf) : kv_index{kf} {}
+      kv_non_unique_index(KF&& kf) : kv_index{kf} {
+         static_assert(std::is_same_v<K, std::remove_cv_t<std::decay_t<decltype(std::invoke(kf, std::declval<const T*>()))>>>,
+               "Make sure the variable/function passed to the constructor returns the same type as the template parameter.");
+      }
 
       template <typename KF>
-      kv_non_unique_index(eosio::name name, KF&& kf) : kv_index{name, kf} {}
+      kv_non_unique_index(eosio::name name, KF&& kf) : kv_index{name, kf} {
+         static_assert(std::is_same_v<K, std::remove_cv_t<std::decay_t<decltype(std::invoke(kf, std::declval<const T*>()))>>>,
+               "Make sure the variable/function passed to the constructor returns the same type as the template parameter.");
+      }
 
       /**
        * Returns an iterator to the object with the lowest key (by this index) in the table.
@@ -939,12 +926,12 @@ public:
       }
 
       void setup() override {
-         prefix = make_prefix(table_name, name);
+         prefix = make_prefix(table_name, index_name);
          impl.config = {
             .db_name            = tbl->db_name,
             .contract_name      = contract_name,
-            .index_name         = name,
-            .primary_index_name = tbl->primary_index->name,
+            .index_name         = index_name,
+            .primary_index_name = tbl->primary_index->index_name,
             .prefix             = prefix
          };
       }
@@ -987,7 +974,7 @@ public:
       T old_value;
 
       auto primary_key = primary_index->get_key(value);
-      auto tbl_key = table_key(make_prefix(table_name, primary_index->name), primary_key);
+      auto tbl_key = table_key(make_prefix(table_name, primary_index->index_name), primary_key);
       auto primary_key_found = internal_use_do_not_use::kv_get(db_name, contract_name.value, tbl_key.data(), tbl_key.size(), value_size);
 
       if (primary_key_found) {
@@ -1006,7 +993,7 @@ public:
 
          if (idx->is_unique()) {
             sec_key = idx->get_key(value);
-            auto sec_tbl_key = table_key(make_prefix(table_name, idx->name), sec_key);
+            auto sec_tbl_key = table_key(make_prefix(table_name, idx->index_name), sec_key);
             auto sec_found = internal_use_do_not_use::kv_get(db_name, contract_name.value, sec_tbl_key.data(), sec_tbl_key.size(), value_size);
 
             if (!primary_key_found) {
@@ -1025,19 +1012,19 @@ public:
             }
 
             if (primary_key_found) {
-               auto old_sec_key = table_key(make_prefix(table_name, idx->name), idx->get_key(old_value));
+               auto old_sec_key = table_key(make_prefix(table_name, idx->index_name), idx->get_key(old_value));
                internal_use_do_not_use::kv_erase(db_name, contract_name.value, old_sec_key.data(), old_sec_key.size());
             }
          } else {
             if (primary_key_found) {
-               auto old_sec_key = table_key(make_prefix(table_name, idx->name), idx->get_key(old_value) + primary_index->get_key(old_value));
+               auto old_sec_key = table_key(make_prefix(table_name, idx->index_name), idx->get_key(old_value) + primary_index->get_key(old_value));
                internal_use_do_not_use::kv_erase(db_name, contract_name.value, old_sec_key.data(), old_sec_key.size());
             }
 
             sec_key = idx->get_key(value) + primary_index->get_key(value);
          }
 
-         auto sec_tbl_key = table_key(make_prefix(table_name, idx->name), sec_key);
+         auto sec_tbl_key = table_key(make_prefix(table_name, idx->index_name), sec_key);
          internal_use_do_not_use::kv_set(db_name, contract_name.value, sec_tbl_key.data(), sec_tbl_key.size(), tbl_key.data(), tbl_key.size());
       }
 
@@ -1063,14 +1050,14 @@ public:
     */
    template <typename K>
    void erase(const K& key) {
-      kv_index_impl<K> impl{{db_name, contract_name, primary_index->name, primary_index->name, primary_index->prefix}};
+      kv_index_impl<K> impl{{db_name, contract_name, primary_index->index_name, primary_index->index_name, primary_index->prefix}};
       auto primary_value = impl.get(key);
 
       if (!primary_value) {
          return;
       }
 
-      auto k = table_key(make_prefix(table_name, primary_index->name), make_key(key));
+      auto k = table_key(make_prefix(table_name, primary_index->index_name), make_key(key));
       internal_use_do_not_use::kv_erase(db_name, contract_name.value, k.data(), k.size());
 
       for (auto& idx : secondary_indices) {
@@ -1082,7 +1069,7 @@ public:
             sk = idx->get_key(*primary_value) + make_key(key);
          }
 
-         auto skey = table_key(make_prefix(table_name, idx->name), sk);
+         auto skey = table_key(make_prefix(table_name, idx->index_name), sk);
          internal_use_do_not_use::kv_erase(db_name, contract_name.value, skey.data(), skey.size());
       }
    }
@@ -1097,10 +1084,10 @@ protected:
       index->tbl = this;
 
       if (is_named) {
-         eosio::check(index->name.value > 0, "All indices must be named if one is named.");
+         eosio::check(index->index_name.value > 0, "All indices must be named if one is named.");
       } else {
-         eosio::check(index->name.value <= 0, "All indices must be named if one is named.");
-         index->name = eosio::name{index_name};
+         eosio::check(index->index_name.value <= 0, "All indices must be named if one is named.");
+         index->index_name = eosio::name{index_name};
       }
 
       index->setup();
@@ -1116,10 +1103,10 @@ protected:
       index->tbl = this;
 
       if (is_named) {
-         eosio::check(index->name.value > 0, "All indices must be named if one is named.");
+         eosio::check(index->index_name.value > 0, "All indices must be named if one is named.");
       } else {
-         eosio::check(index->name.value <= 0, "All indices must be named if one is named.");
-         index->name = eosio::name{index_name};
+         eosio::check(index->index_name.value <= 0, "All indices must be named if one is named.");
+         index->index_name = eosio::name{index_name};
       }
 
       index->setup();
@@ -1138,7 +1125,8 @@ protected:
     */
    template <typename PrimaryIndex, typename... SecondaryIndices>
    void init(eosio::name contract, eosio::name table, eosio::name db, PrimaryIndex prim_index, SecondaryIndices... indices) {
-      // TODO
+      // TODO Should be able to static_assert here then downcast
+      // How to static assert its a kv_unique_index without an actual template type?
       eosio::check(prim_index->is_unique(), "Primary Index should be kv_unique_index.");
 
       contract_name = contract;
@@ -1153,10 +1141,10 @@ protected:
       primary_index->table_name = table_name;
       primary_index->tbl = this;
 
-      if (primary_index->name.value > 0) {
+      if (primary_index->index_name.value > 0) {
          is_named = true;
       } else {
-         primary_index->name = eosio::name{index_name};
+         primary_index->index_name = eosio::name{index_name};
          ++index_name;
       }
 
