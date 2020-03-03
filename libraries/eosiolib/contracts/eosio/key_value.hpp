@@ -756,18 +756,20 @@ public:
 
       template <typename KF>
       kv_unique_index(KF&& kf) : kv_index{kf} {
-#if 0
-         static_assert(std::is_same_v<T, std::remove_cv_t<std::decay_t<decltype(get_return_t(kf))>>>,
+         // TODO: Add this back in once get_return_t handles lambdas correctly.
+         #if 0
+         static_assert(std::is_same_v<K, std::remove_cv_t<std::decay_t<decltype(get_return_t(kf))>>>,
                "Make sure the variable/function passed to the constructor returns the same type as the template parameter.");
-#endif
+         #endif
       }
 
       template <typename KF>
       kv_unique_index(eosio::name name, KF&& kf) : kv_index{name, kf} {
-#if 0
-         static_assert(std::is_same_v<T, std::remove_cv_t<std::decay_t<decltype(get_return_t(kf))>>>,
+         // TODO: Add this back in once get_return_t handles lambdas correctly.
+         #if 0
+         static_assert(std::is_same_v<K, std::remove_cv_t<std::decay_t<decltype(get_return_t(kf))>>>,
               "Make sure the variable/function passed to the constructor returns the same type as the template parameter.");
-#endif
+         #endif
       }
 
       /**
@@ -1169,7 +1171,6 @@ private:
    eosio::name contract_name;
    eosio::name table_name;
    uint64_t db_name;
-
 
    kv_index* primary_index;
    std::vector<kv_index*> secondary_indices;
