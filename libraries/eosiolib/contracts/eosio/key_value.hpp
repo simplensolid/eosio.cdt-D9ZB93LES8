@@ -474,7 +474,7 @@ class kv_table {
          void* buffer = value_size > detail::max_stack_buffer_size ? malloc(value_size) : alloca(value_size);
          auto stat = internal_use_do_not_use::kv_it_value(itr, offset, (char*)buffer, value_size, actual_value_size);
 
-         eosio::check(static_cast<kv_it_stat>(stat) != kv_it_stat::iterator_end, "Error reading value");
+         eosio::check(static_cast<kv_it_stat>(stat) == kv_it_stat::iterator_ok, "Error reading value");
 
          void* deserialize_buffer = buffer;
          size_t deserialize_size = actual_value_size;
@@ -509,6 +509,11 @@ class kv_table {
          itr_stat = static_cast<kv_it_stat>(internal_use_do_not_use::kv_it_prev(itr));
          eosio::check(itr_stat != kv_it_stat::iterator_end, "decremented past the beginning");
          return *this;
+      }
+
+      // TODO: Is there a better option?
+      uint32_t key_compare(key_type kt) {
+         return internal_use_do_not_use::kv_it_key_compare(itr, kt.data(), kt.size());
       }
 
       bool operator==(const iterator& b) const {
@@ -557,7 +562,9 @@ class kv_table {
    };
 
    template <typename K>
-   struct kv_index_impl {
+   class kv_index_impl {
+   public:
+
       kv_index_impl() = default;
 
       kv_index_impl(const index_config& config)
@@ -598,7 +605,8 @@ class kv_table {
 
          iterator it{itr, static_cast<kv_it_stat>(itr_stat), config};
 
-         auto cmp = internal_use_do_not_use::kv_it_key_compare(it.itr, t_key.data(), t_key.size());
+         // auto cmp = internal_use_do_not_use::kv_it_key_compare(it.itr, t_key.data(), t_key.size());
+         auto cmp = it.key_compare(t_key);
          if (cmp == 0) {
             ++it;
          }
@@ -725,22 +733,21 @@ class kv_table {
 
       std::function<key_type(const T&)> key_function;
 
-      void set_prefix() {
-         prefix = make_prefix(table_name, name);
-      }
+      virtual void setup() = 0;
    };
 
 public:
 
+   //using iterator = kv_table<T>::kv_index_impl::iterator;
    using iterator = kv_table::iterator;
 
    template <typename K>
    class kv_unique_index : public kv_index {
-      index_config config;
       kv_index_impl<K> impl;
 
    public:
       using kv_table<T>::kv_index::tbl;
+      using kv_table<T>::kv_index::table_name;
       using kv_table<T>::kv_index::contract_name;
       using kv_table<T>::kv_index::name;
       using kv_table<T>::kv_index::prefix;
@@ -748,7 +755,7 @@ public:
       kv_unique_index() = default;
 
       template <typename KF>
-      kv_unique_index(KF&& kf) : kv_index{kf}, config{tbl->db_name, contract_name, name, tbl->primary_index->name, prefix}, impl{config} {
+      kv_unique_index(KF&& kf) : kv_index{kf} {
 #if 0
          static_assert(std::is_same_v<T, std::remove_cv_t<std::decay_t<decltype(get_return_t(kf))>>>,
                "Make sure the variable/function passed to the constructor returns the same type as the template parameter.");
@@ -756,7 +763,7 @@ public:
       }
 
       template <typename KF>
-      kv_unique_index(eosio::name name, KF&& kf) : kv_index{name, kf}, config{tbl->db_name, contract_name, name, tbl->primary_index->name, prefix}, impl{config} {
+      kv_unique_index(eosio::name name, KF&& kf) : kv_index{name, kf} {
 #if 0
          static_assert(std::is_same_v<T, std::remove_cv_t<std::decay_t<decltype(get_return_t(kf))>>>,
               "Make sure the variable/function passed to the constructor returns the same type as the template parameter.");
@@ -840,15 +847,27 @@ public:
       bool is_unique() override {
          return true;
       }
+
+      void setup() override {
+         prefix = make_prefix(table_name, name);
+         impl.config = {
+            .db_name            = tbl->db_name,
+            .contract_name      = contract_name,
+            .index_name         = name,
+            .primary_index_name = tbl->primary_index->name,
+            .prefix             = prefix
+         };
+
+      }
    };
 
    template <typename K>
    class kv_non_unique_index : public kv_index {
-      index_config config;
       kv_index_impl<K> impl;
 
    public:
       using kv_table<T>::kv_index::tbl;
+      using kv_table<T>::kv_index::table_name;
       using kv_table<T>::kv_index::contract_name;
       using kv_table<T>::kv_index::name;
       using kv_table<T>::kv_index::prefix;
@@ -856,10 +875,10 @@ public:
       kv_non_unique_index() = default;
 
       template <typename KF>
-      kv_non_unique_index(KF&& kf) : kv_index{kf}, config{tbl->db_name, contract_name, name, tbl->primary_index->name, prefix}, impl{config} {}
+      kv_non_unique_index(KF&& kf) : kv_index{kf} {}
 
       template <typename KF>
-      kv_non_unique_index(eosio::name name, KF&& kf) : kv_index{name, kf}, config{tbl->db_name, contract_name, name, tbl->primary_index->name, prefix}, impl{config} {}
+      kv_non_unique_index(eosio::name name, KF&& kf) : kv_index{name, kf} {}
 
       /**
        * Returns an iterator to the object with the lowest key (by this index) in the table.
@@ -916,6 +935,17 @@ public:
       bool is_unique() override {
          return false;
       }
+
+      void setup() override {
+         prefix = make_prefix(table_name, name);
+         impl.config = {
+            .db_name            = tbl->db_name,
+            .contract_name      = contract_name,
+            .index_name         = name,
+            .primary_index_name = tbl->primary_index->name,
+            .prefix             = prefix
+         };
+      }
    };
 
 
@@ -939,6 +969,8 @@ public:
       bool is_unique() override {
          return false;
       }
+
+      void setup() override {}
    };
 
    /**
@@ -1029,13 +1061,6 @@ public:
     */
    template <typename K>
    void erase(const K& key) {
-      // TODO: Need a replacement for this.
-      // Maybe we take a value or an iterator instead?
-      //
-      // Move get and find to kv_impl
-      // Instantiate impl here and use it to get before the delete.
-      //
-      // auto primary_value = primary_index->get(key);
       kv_index_impl<K> impl{{db_name, contract_name, primary_index->name, primary_index->name, primary_index->prefix}};
       auto primary_value = impl.get(key);
 
@@ -1076,7 +1101,7 @@ protected:
          index->name = eosio::name{index_name};
       }
 
-      index->set_prefix();
+      index->setup();
       secondary_indices.push_back(index);
       ++index_name;
       setup_indices(index_name, is_named, indices...);
@@ -1095,7 +1120,7 @@ protected:
          index->name = eosio::name{index_name};
       }
 
-      index->set_prefix();
+      index->setup();
       secondary_indices.push_back(index);
    }
 
@@ -1111,6 +1136,9 @@ protected:
     */
    template <typename PrimaryIndex, typename... SecondaryIndices>
    void init(eosio::name contract, eosio::name table, eosio::name db, PrimaryIndex prim_index, SecondaryIndices... indices) {
+      // TODO
+      eosio::check(prim_index->is_unique(), "Primary Index should be kv_unique_index.");
+
       contract_name = contract;
       table_name = table;
       db_name = db.value;
@@ -1130,7 +1158,7 @@ protected:
          ++index_name;
       }
 
-      primary_index->set_prefix();
+      primary_index->setup();
 
       if constexpr (sizeof...(indices) > 0) {
          setup_indices(index_name, is_named, indices...);
