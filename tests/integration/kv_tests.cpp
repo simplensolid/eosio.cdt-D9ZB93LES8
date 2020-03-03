@@ -150,6 +150,7 @@ BOOST_FIXTURE_TEST_CASE(multi_tests_unique_secondary, tester) try {
     push_action(N(kvtest), N(uniqsecidx), N(kvtest), {});
 } FC_LOG_AND_RETHROW()
 
+/* TODO: These are probably not necessary anymore.
 BOOST_FIXTURE_TEST_CASE(multi_tests_unique_secondary_error, tester) try {
     create_accounts( { N(kvtest) } );
     produce_block();
@@ -165,4 +166,5 @@ BOOST_FIXTURE_TEST_CASE(multi_tests_unique_secondary_error, tester) try {
                           eosio_assert_message_exception,
                           eosio_assert_message_is("Attempted to update an existing unique secondary index."));
 } FC_LOG_AND_RETHROW()
+*/
 BOOST_AUTO_TEST_SUITE_END()

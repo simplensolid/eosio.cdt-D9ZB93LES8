@@ -936,6 +936,7 @@ protected:
 
    template <typename I, typename... Indices>
    void setup_indices(uint64_t index_name, bool is_named, I index, Indices... indices) {
+      // TODO: If null_kv_index then just increment and skip
       index->contract_name = contract_name;
       index->table_name = table_name;
       index->tbl = this;
@@ -955,6 +956,7 @@ protected:
 
    template <typename I>
    void setup_indices(uint64_t index_name, bool is_named, I index) {
+      // TODO: If null_kv_index then just increment and skip
       index->contract_name = contract_name;
       index->table_name = table_name;
       index->tbl = this;
