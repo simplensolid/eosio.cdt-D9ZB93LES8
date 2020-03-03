@@ -35,7 +35,7 @@ struct my_table_v : eosio::kv_table<std::variant<my_struct_v, my_struct_v2>> {
          }
       }, *obj);
    }};
-   kv_non_unique_index<uint64_t> age{[](const auto& obj) {
+   kv_unique_index<uint64_t> age{[](const auto& obj) {
       return std::visit([&](auto&& a) {
          return a.age;
       }, *obj);

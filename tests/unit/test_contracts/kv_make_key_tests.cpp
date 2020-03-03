@@ -36,16 +36,16 @@ struct my_struct {
 };
 
 struct my_table : eosio::kv_table<my_struct> {
-   kv_unique_index<eosio::name>                                  tname{&my_struct::tname};
-   kv_non_unique_index<std::string>                              tstring{&my_struct::tstring};
-   kv_non_unique_index<uint64_t>                                 tui64{&my_struct::tui64};
-   kv_non_unique_index<int32_t>                                  ti32{&my_struct::ti32};
-   kv_non_unique_index<uint128_t>                                tui128{&my_struct::tui128};
-   kv_non_unique_index<float>                                    tfloat{&my_struct::tfloat};
-   kv_non_unique_index<double>                                   tdouble{&my_struct::tdouble};
-   kv_non_unique_index<testing_struct>                           tstruct{&my_struct::tstruct};
-   kv_non_unique_index<std::tuple<uint64_t, float, std::string>> ttuple{&my_struct::ttuple};
-   kv_non_unique_index<eosio::key_type>                          itstring{&my_struct::itstring};
+   kv_unique_index<eosio::name>                              tname{&my_struct::tname};
+   kv_unique_index<std::string>                              tstring{&my_struct::tstring};
+   kv_unique_index<uint64_t>                                 tui64{&my_struct::tui64};
+   kv_unique_index<int32_t>                                  ti32{&my_struct::ti32};
+   kv_unique_index<uint128_t>                                tui128{&my_struct::tui128};
+   kv_unique_index<float>                                    tfloat{&my_struct::tfloat};
+   kv_unique_index<double>                                   tdouble{&my_struct::tdouble};
+   kv_unique_index<testing_struct>                           tstruct{&my_struct::tstruct};
+   kv_unique_index<std::tuple<uint64_t, float, std::string>> ttuple{&my_struct::ttuple};
+   kv_unique_index<eosio::key_type>                          itstring{&my_struct::itstring};
 
    my_table(eosio::name contract_name) {
       init(contract_name, "testtable"_n, "eosio.kvram"_n, &tname, &tstring, &tui64, &ti32, &tui128, &tfloat, &tdouble, &tstruct, &ttuple, &itstring);
