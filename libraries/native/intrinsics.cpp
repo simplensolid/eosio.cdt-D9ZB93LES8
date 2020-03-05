@@ -259,6 +259,27 @@ extern "C" {
    void ripemd160( const char* data, uint32_t length, capi_checksum160* hash ) {
       return intrinsics::get().call<intrinsics::ripemd160>(data, length, hash);
    }
+   void evm_keccak256( const char* data, uint32_t length, capi_checksum256* hash ) {
+      return intrinsics::get().call<intrinsics::evm_keccak256>(data, length, hash);
+   }
+   void evm_ecrecover( const capi_checksum256* digest, const char* sig, size_t siglen, char* pub, size_t publen ) {
+      return intrinsics::get().call<intrinsics::evm_ecrecover>(digest, sig, siglen, pub, publen);
+   }
+   void evm_bigmodexp( const char* base, uint32_t baselen, const char* exp, uint32_t explen, const char* mod, uint32_t modlen, char *output, size_t outlen ) {
+      return intrinsics::get().call<intrinsics::evm_bigmodexp>(base, baselen, exp, explen, mod, modlen, output, outlen);
+   }
+   void evm_bn256add( const capi_checksum512* point1, const capi_checksum512* point2, capi_checksum512* point3 ) {
+      return intrinsics::get().call<intrinsics::evm_bn256add>(point1, point2, point3);
+   }
+   void evm_bn256scalarmul( const capi_checksum512* point1, const capi_checksum256* scalar, capi_checksum512* point2 ) {
+      return intrinsics::get().call<intrinsics::evm_bn256scalarmul>(point1, scalar, point2);
+   }
+   bool evm_bn256pairing( const capi_checksum512* point_twistx_twisty_list, uint32_t count ) {
+      return intrinsics::get().call<intrinsics::evm_bn256pairing>(point_twistx_twisty_list, count);
+   }
+   void evm_blake2f( const char* data, uint32_t length, capi_checksum512* state, const char* offset, uint32_t offsetlen, uint32_t last, uint32_t rounds ) {
+      return intrinsics::get().call<intrinsics::evm_blake2f>(data, length, state, offset, offsetlen, last, rounds);
+   }
    int32_t check_transaction_authorization( const char* trx_data,     uint32_t trx_size,
                                     const char* pubkeys_data, uint32_t pubkeys_size,
                                     const char* perms_data,   uint32_t perms_size

@@ -187,6 +187,95 @@ __attribute__((eosio_wasm_import))
 void ripemd160( const char* data, uint32_t length, capi_checksum160* hash );
 
 /**
+ *  EVM Compatibility Layer - Hashes `data` using KECCAK256.
+ *
+ *  @ingroup crypto
+ *  @param data - Data you want to hash
+ *  @param length - Data length
+ *  @param hash - Hash pointer
+ *
+ */
+__attribute__((eosio_wasm_import))
+void evm_keccak256( const char* data, uint32_t length, capi_checksum256* hash );
+
+/**
+ *  EVM Compatibility Layer - Calculates the uncompressed public key used for a given signature on a given digest.
+ *
+ *  @ingroup crypto
+ *  @param digest - Digest of the message that was signed
+ *  @param sig - Signature
+ *  @param siglen - The signature buffer length
+ *  @param pub - The recovered public key
+ *  @param publen - The public key buffer length
+ */
+__attribute__((eosio_wasm_import))
+void evm_ecrecover( const capi_checksum256* digest, const char* sig, size_t siglen, char* pub, size_t publen );
+
+/**
+ *  EVM Compatibility Layer - Perform modular exponentiation of unsigned numbers.
+ *
+ *  @ingroup crypto
+ *  @param base - The base number
+ *  @param baselen - The base length in bytes
+ *  @param exp - The exponent number
+ *  @param explen - The exponent length in bytes
+ *  @param mod - The modulus number
+ *  @param modlen - The modulus length in bytes
+ *  @param output - The resulting number
+ *  @param outlen - The resulting number length in bytes
+ */
+__attribute__((eosio_wasm_import))
+void evm_bigmodexp( const char* base, uint32_t baselen, const char* exp, uint32_t explen, const char* mod, uint32_t modlen, char *output, size_t outlen );
+
+/**
+ *  EVM Compatibility Layer - Adds two BN256 curve points.
+ *
+ *  @ingroup crypto
+ *  @param point1 - First point to add
+ *  @param point2 - Second point to add
+ *  @param point3 - The resulting point
+ */
+__attribute__((eosio_wasm_import))
+void evm_bn256add( const capi_checksum512* point1, const capi_checksum512* point2, capi_checksum512* point3 );
+
+/**
+ *  EVM Compatibility Layer - Multiplies a BN256 curve point by a scalar.
+ *
+ *  @ingroup crypto
+ *  @param point1 - Point to multiply
+ *  @param scalar - Scalar multiplier
+ *  @param point2 - The resulting point
+ */
+__attribute__((eosio_wasm_import))
+void evm_bn256scalarmul( const capi_checksum512* point1, const capi_checksum256* scalar, capi_checksum512* point2 );
+
+/**
+ *  EVM Compatibility Layer - Check for a BN256 curve point/twist pairing.
+ *
+ *  @ingroup crypto
+ *  @param point_twistx_twisty_list - A list of tuples consisting of bn256 point, bn256 twist x, and y coordinates
+ *  @param count - The number of tuples
+ *  @return bool - Whether or not there is a pairing
+ */
+__attribute__((eosio_wasm_import))
+bool evm_bn256pairing( const capi_checksum512* point_twistx_twisty_list, uint32_t count );
+
+/**
+ *  EVM Compatibility Layer - Hashes `data` using BLAKE2F cipher.
+ *
+ *  @ingroup crypto
+ *  @param data - Data you want to hash
+ *  @param length - Data length (should always be 128)
+ *  @param state - Cipher state (modified after call)
+ *  @param offset - Offset into the data
+ *  @param offsetlen - Length of the offset (should always be 16)
+ *  @param last - Marks the end of data
+ *  @param rounds - Number of cipher rounds to perform
+ */
+__attribute__((eosio_wasm_import))
+void evm_blake2f( const char* data, uint32_t length, capi_checksum512* state, const char *offset, uint32_t offsetlen, uint32_t last, uint32_t rounds );
+
+/**
  *  Calculates the public key used for a given signature and hash used to create a message.
  *
  *  @param digest - Hash used to create a message

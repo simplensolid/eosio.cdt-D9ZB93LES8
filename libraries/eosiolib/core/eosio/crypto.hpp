@@ -29,6 +29,15 @@ namespace eosio {
    using ecc_public_key = std::array<char, 33>;
 
    /**
+    *  EOSIO ECC uncompressed public key data
+    *
+    *  Fixed size representation of either a K1 or R1 uncompressed public key
+
+    *  @ingroup public_key
+    */
+   using ecc_uncompressed_public_key = std::array<char, 65>;
+
+   /**
     *  EOSIO WebAuthN public key
     *
     *  @ingroup public_key
@@ -316,6 +325,85 @@ namespace eosio {
     *  @return eosio::checksum160 - Computed digest
     */
    eosio::checksum160 ripemd160( const char* data, uint32_t length );
+
+   /**
+    *  EVM Compatibility Layer - Hashes `data` using KECCAK256.
+    *
+    *  @ingroup crypto
+    *  @param data - Data you want to hash
+    *  @param length - Data length
+    *  @return eosio::checksum256 - Computed digest
+    */
+   eosio::checksum256 evm_keccak256( const char* data, uint32_t length );
+
+   /**
+    *  EVM Compatibility Layer - Calculates the uncompressed public key used for a given signature on a given digest.
+    *
+    *  @ingroup crypto
+    *  @param digest - Digest of the message that was signed
+    *  @param sig - Signature
+    *  @return eosio::ecc_uncompressed_public_key - Recovered public key
+    */
+   eosio::ecc_uncompressed_public_key evm_ecrecover( const eosio::checksum256& digest, const eosio::ecc_signature& sig );
+
+   /**
+    *  EVM Compatibility Layer - Perform modular exponentiation of unsigned numbers.
+    *
+    *  @ingroup crypto
+    *  @param base - The base number
+    *  @param baselen - The base length in bytes
+    *  @param exp - The exponent number
+    *  @param explen - The exponent length in bytes
+    *  @param mod - The modulus number
+    *  @param modlen - The modulus length in bytes
+    *  @param output - The resulting number
+    *  @param outlen - The resulting number length in bytes
+    */
+   void evm_bigmodexp( const char* base, uint32_t baselen, const char* exp, uint32_t explen, const char* mod, uint32_t modlen, char *output, size_t outlen );
+
+   /**
+    *  EVM Compatibility Layer - Adds two BN256 curve points.
+    *
+    *  @ingroup crypto
+    *  @param point1 - First point to add
+    *  @param point2 - Second point to add
+    *  @return eosio::checksum512 - The resulting point
+    */
+   eosio::checksum512 evm_bn256add( const eosio::checksum512& point1, const eosio::checksum512& point2 );
+
+   /**
+    *  EVM Compatibility Layer - Multiplies a BN256 curve point by a scalar.
+    *
+    *  @ingroup crypto
+    *  @param point - Point to multiply
+    *  @param scalar - Scalar multiplier
+    *  @return eosio::checksum512 - The resulting point
+    */
+   eosio::checksum512 evm_bn256scalarmul( const eosio::checksum512& point, const eosio::checksum256& scalar );
+
+   /**
+    *  EVM Compatibility Layer - Check for a BN256 curve point/twist pairing.
+    *
+    *  @ingroup crypto
+    *  @param points - A list of tuples consisting of bn256 point, bn256 twist x, and y coordinates
+    *  @param count - The number of tuples in the list
+    *  @return bool - Whether or not there is a pairing
+    */
+   bool evm_bn256pairing( const eosio::checksum512* points, uint32_t count );
+
+   /**
+    *  EVM Compatibility Layer - Hashes `data` using BLAKE2F cipher.
+    *
+    *  @ingroup crypto
+    *  @param data - Data you want to hash
+    *  @param length - Data length (should always be 128)
+    *  @param state - Cipher state (modified after call)
+    *  @param offset - Offset into the data
+    *  @param offsetlen - Length of the offset (should always be 16)
+    *  @param last - Marks the end of data
+    *  @param rounds - Number of cipher rounds to perform
+    */
+   void evm_blake2f( const char* data, uint32_t length, eosio::checksum512& state, const char* offset, uint32_t offsetlen, uint32_t last, uint32_t rounds );
 
    /**
     *  Calculates the public key used for a given signature on a given digest.
